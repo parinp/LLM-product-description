@@ -3,6 +3,7 @@ import streamlit as st
 from google import genai
 from dotenv import load_dotenv
 from PIL import Image
+from PIL import ImageOps
 import io
 import cv2
 import numpy as np
@@ -311,6 +312,8 @@ def main():
                     st.video(media_path)
                 else:
                     # Display image for image files or if video display fails
+                    # Apply EXIF transpose to preserve image orientation
+                    media_image = ImageOps.exif_transpose(media_image)
                     st.image(media_image, use_container_width=True)
                 
                 st.caption(f"Detected Product: {result.get('product_category', 'Unknown')}")
