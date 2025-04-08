@@ -7,6 +7,7 @@ import io
 import cv2
 import numpy as np
 import tempfile
+import time
 from templates import get_template_names, apply_template
 
 # Load environment variables
@@ -62,57 +63,102 @@ def read_image_file(uploaded_file):
     img = Image.open(io.BytesIO(bytes_data))
     return img
 
-def read_video_frame(uploaded_file):
-    """Extract a frame from the video file."""
-    # Save uploaded file to a temporary file
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
+def save_uploaded_file(uploaded_file):
+    """Save the uploaded file to a temporary location and return the path."""
+    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
         tmp_file.write(uploaded_file.getvalue())
-        tmp_file_path = tmp_file.name
+        return tmp_file.name
+
+def upload_video_to_gemini(file_path):
+    """Upload a video file to Gemini API and wait until it's processed."""
+    # Upload the file to Gemini
+    video_file = client.files.upload(file=file_path)
+    st.info(f"Video uploaded. Processing...")
     
-    # Open video file
-    cap = cv2.VideoCapture(tmp_file_path)
+    # Wait for processing to complete
+    while video_file.state.name == "PROCESSING":
+        time.sleep(1)
+        video_file = client.files.get(name=video_file.name)
+        
+    # Check if processing was successful
+    if video_file.state.name == "FAILED":
+        raise ValueError(f"Video processing failed: {video_file.state.name}")
     
-    # Check if video opened successfully
-    if not cap.isOpened():
-        os.unlink(tmp_file_path)
-        raise ValueError("Failed to open video file")
-    
-    # Read middle frame
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    middle_frame = total_frames // 2
-    cap.set(cv2.CAP_PROP_POS_FRAMES, middle_frame)
-    ret, frame = cap.read()
-    
-    # Release video capture and delete temp file
-    cap.release()
-    os.unlink(tmp_file_path)
-    
-    if not ret:
-        raise ValueError("Failed to extract frame from video")
-    
-    # Convert from BGR to RGB (PIL format)
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    img = Image.fromarray(frame_rgb)
-    
-    return img
+    return video_file
+
+def delete_gemini_file(file_name):
+    """Delete a file from Gemini servers."""
+    try:
+        client.files.delete(name=file_name)
+        return True
+    except Exception as e:
+        st.warning(f"Failed to delete file from Gemini servers: {str(e)}")
+        return False
 
 def analyze_media(uploaded_file, file_type):
     """Analyze the uploaded media using Gemini Vision API."""
     try:
-        # Process based on file type
-        if file_type == "image":
-            image = read_image_file(uploaded_file)
-        else:  # video
-            image = read_video_frame(uploaded_file)
-        
         # Create the prompt
         prompt = generate_product_prompt(file_type)
+        gemini_file_name = None
         
-        # Generate content using Gemini
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=[prompt, image]
-        )
+        # Process based on file type
+        if file_type == "image":
+            # For images, use direct approach
+            image = read_image_file(uploaded_file)
+            
+            # Generate content using Gemini
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=[prompt, image]
+            )
+            
+            return_image = image
+            return_media_path = None
+            
+        else:  # video
+            # For videos, upload to Gemini
+            temp_file_path = save_uploaded_file(uploaded_file)
+            
+            try:
+                # Upload video to Gemini
+                video_file = upload_video_to_gemini(temp_file_path)
+                gemini_file_name = video_file.name
+                
+                # Generate content using the video file reference
+                response = client.models.generate_content(
+                    model="gemini-2.0-flash",
+                    contents=[prompt, video_file]
+                )
+                
+                # Delete the file from Gemini servers after analysis
+                delete_gemini_file(gemini_file_name)
+                
+                # Extract a frame for fallback display if needed
+                cap = cv2.VideoCapture(temp_file_path)
+                ret, frame = cap.read()
+                cap.release()
+                
+                if ret:
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    return_image = Image.fromarray(frame_rgb)
+                else:
+                    # Use a placeholder image if frame extraction fails
+                    return_image = Image.new('RGB', (300, 200), color='gray')
+                
+                # Keep the path to display the video
+                return_media_path = temp_file_path
+                
+            except Exception as e:
+                # Ensure temp file is deleted on error
+                if os.path.exists(temp_file_path):
+                    os.unlink(temp_file_path)
+                
+                # Try to delete the file from Gemini if it was created
+                if gemini_file_name:
+                    delete_gemini_file(gemini_file_name)
+                    
+                raise e
         
         # Parse JSON from the response
         import json
@@ -127,12 +173,12 @@ def analyze_media(uploaded_file, file_type):
             
             # Parse JSON
             product_data = json.loads(json_str)
-            return True, image, product_data
+            return True, return_image, product_data, return_media_path, file_type
         except json.JSONDecodeError as e:
-            return False, image, f"Error parsing JSON response: {str(e)}. Raw response: {response.text}"
+            return False, return_image, f"Error parsing JSON response: {str(e)}. Raw response: {response.text}", return_media_path, file_type
     
     except Exception as e:
-        return False, None, f"Error analyzing media: {str(e)}"
+        return False, None, f"Error analyzing media: {str(e)}", None, file_type
 
 def main():
     """Main function to run the Streamlit app."""
@@ -152,15 +198,23 @@ def main():
         # Show analysis button
         if st.button("Analyze Product"):
             with st.spinner(f"Analyzing {file_type}..."):
-                success, media, result = analyze_media(uploaded_file, file_type)
+                success, media_image, result, media_path, media_type = analyze_media(uploaded_file, file_type)
             
             if success:
                 # Display results in columns
                 col1, col2 = st.columns([1, 1])
                 
                 with col1:
-                    st.subheader("Product Image")
-                    st.image(media, use_column_width=True)
+                    st.subheader("Product Image/Video")
+                    
+                    # Display media based on type
+                    if media_type == "video" and media_path is not None:
+                        # Display video player for video files
+                        st.video(media_path)
+                    else:
+                        # Display image for image files or if video display fails
+                        st.image(media_image, use_column_width=True)
+                    
                     st.caption(f"Detected Product: {result.get('product_category', 'Unknown')}")
                 
                 with col2:
@@ -187,6 +241,13 @@ def main():
                     st.json(result)
             else:
                 st.error(result)
+                
+                # If we have media to display despite error, show it
+                if media_image is not None or media_path is not None:
+                    if media_type == "video" and media_path is not None:
+                        st.video(media_path)
+                    elif media_image is not None:
+                        st.image(media_image, caption="Uploaded media")
     
     # Add instructions at the bottom
     with st.expander("Tips for Best Results"):
@@ -199,6 +260,18 @@ def main():
         - For videos, ensure the product is clearly visible in the middle frames
         - The analyzer works best with physical products rather than digital goods
         """)
+    
+    # Clean up temporary files when the app is closed
+    def cleanup():
+        for filename in os.listdir(tempfile.gettempdir()):
+            if os.path.isfile(os.path.join(tempfile.gettempdir(), filename)):
+                try:
+                    os.unlink(os.path.join(tempfile.gettempdir(), filename))
+                except:
+                    pass
+    
+    import atexit
+    atexit.register(cleanup)
 
 if __name__ == "__main__":
     main() 
