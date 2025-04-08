@@ -12,7 +12,8 @@ from templates import get_template_names, apply_template
 
 # Load environment variables
 load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 
 if not GEMINI_API_KEY:
     st.error("GEMINI_API_KEY not found. Please add it to your .env file.")
@@ -27,6 +28,20 @@ st.set_page_config(
     page_icon="🔍",
     layout="wide",
 )
+
+# Initialize session state variables
+if 'current_template' not in st.session_state:
+    st.session_state.current_template = None
+if 'previous_template' not in st.session_state:
+    st.session_state.previous_template = None
+if 'show_popup' not in st.session_state:
+    st.session_state.show_popup = False
+if 'formatted_output' not in st.session_state:
+    st.session_state.formatted_output = None
+if 'product_data' not in st.session_state:
+    st.session_state.product_data = None
+if 'regenerating' not in st.session_state:
+    st.session_state.regenerating = False
 
 def generate_product_prompt(file_type="image"):
     """Generate a prompt for product analysis based on file type."""
@@ -186,6 +201,44 @@ def analyze_media(uploaded_file, file_type):
     except Exception as e:
         return False, None, f"Error analyzing media: {str(e)}", None, file_type
 
+def handle_template_change():
+    """Handle template change with confirmation popup."""
+    # Get the selected template from the radio button
+    new_template = st.session_state.selected_template_radio
+    
+    # If it's the first selection, just accept it
+    if st.session_state.current_template is None:
+        st.session_state.current_template = new_template
+        st.session_state.formatted_output = apply_template(new_template, st.session_state.product_data)
+        return
+    
+    # If selecting the same template, do nothing
+    if new_template == st.session_state.current_template:
+        return
+        
+    # Store the previous and set the new template
+    st.session_state.previous_template = st.session_state.current_template
+    st.session_state.current_template = new_template
+    
+    # Show the popup
+    st.session_state.show_popup = True
+
+def confirm_template_change():
+    """Confirm the template change and regenerate content."""
+    # Set regenerating flag and generate new content
+    st.session_state.regenerating = True
+    st.session_state.formatted_output = apply_template(st.session_state.current_template, st.session_state.product_data)
+    st.session_state.show_popup = False
+    st.session_state.regenerating = False
+
+def cancel_template_change():
+    """Cancel the template change and revert to previous selection."""
+    # Revert to previous template
+    st.session_state.current_template = st.session_state.previous_template
+    st.session_state.show_popup = False
+    # Update the radio button value
+    st.session_state.selected_template_radio = st.session_state.previous_template
+
 def main():
     """Main function to run the Streamlit app."""
     st.title("🔍 Product Analyzer")
@@ -214,34 +267,115 @@ def main():
         file_type = "video" if uploaded_file.type.startswith("video") else "image"
         
         # Show analysis button
-        if st.button("Analyze Product"):
+        analyze_clicked = st.button("Analyze Product")
+        
+        if analyze_clicked:
+            # Reset template selection when analyzing a new product
+            st.session_state.current_template = None
+            st.session_state.previous_template = None
+            st.session_state.formatted_output = None
+            st.session_state.show_popup = False
+            
             with st.spinner(f"Analyzing {file_type}..."):
                 success, media_image, result, media_path, media_type = analyze_media(uploaded_file, file_type)
             
+            # Store analysis results in session state
+            st.session_state.analysis_success = success
+            st.session_state.media_image = media_image
+            st.session_state.result = result
+            st.session_state.media_path = media_path
+            st.session_state.media_type = media_type
+            
             if success:
-                # Display results in columns
-                col1, col2 = st.columns([1, 1])
+                # Store product data in session state for template switching
+                st.session_state.product_data = result
+        
+        # Check if we have analysis results to display
+        if hasattr(st.session_state, 'analysis_success') and st.session_state.analysis_success:
+            # Get values from session state
+            success = st.session_state.analysis_success
+            media_image = st.session_state.media_image
+            result = st.session_state.result
+            media_path = st.session_state.media_path
+            media_type = st.session_state.media_type
+            
+            # Display results in columns
+            col1, col2 = st.columns([1, 1])
+            
+            with col1:
+                st.subheader("Product Image/Video")
                 
-                with col1:
-                    st.subheader("Product Image/Video")
-                    
-                    # Display media based on type
-                    if media_type == "video" and media_path is not None:
-                        # Display video player for video files
-                        st.video(media_path)
-                    else:
-                        # Display image for image files or if video display fails
-                        st.image(media_image, use_column_width=True)
-                    
-                    st.caption(f"Detected Product: {result.get('product_category', 'Unknown')}")
+                # Display media based on type
+                if media_type == "video" and media_path is not None:
+                    # Display video player for video files
+                    st.video(media_path)
+                else:
+                    # Display image for image files or if video display fails
+                    st.image(media_image, use_column_width=True)
                 
-                with col2:
-                    st.subheader("Choose Template")
-                    template_names = get_template_names()
-                    selected_template = st.radio("Select template style:", template_names)
-                    
+                st.caption(f"Detected Product: {result.get('product_category', 'Unknown')}")
+            
+            with col2:
+                st.subheader("Choose Template")
+                
+                # Get template names
+                template_names = get_template_names()
+                
+                # Initialize selected_template_radio in session state if not present
+                if 'selected_template_radio' not in st.session_state:
+                    st.session_state.selected_template_radio = template_names[0]
+                
+                # Update selected_template_radio if current_template is set but radio isn't matching
+                if st.session_state.current_template and st.session_state.selected_template_radio != st.session_state.current_template:
+                    st.session_state.selected_template_radio = st.session_state.current_template
+                
+                # Make template selection using session state for the value
+                st.radio(
+                    "Select template style:", 
+                    template_names,
+                    key="selected_template_radio",
+                    on_change=handle_template_change
+                )
+                
+                # Update current template if it's not set
+                if st.session_state.current_template is None:
+                    st.session_state.current_template = st.session_state.selected_template_radio
+                    st.session_state.formatted_output = apply_template(st.session_state.current_template, result)
+                
+                # Display popup if needed
+                if st.session_state.show_popup:
+                    popup_container = st.container()
+                    with popup_container:
+                        st.markdown("---")
+                        st.subheader("Confirm Template Change")
+                        st.write(f"Would you like to regenerate content using the '{st.session_state.current_template}' template?")
+                        
+                        popup_cols = st.columns(2)
+                        with popup_cols[0]:
+                            if st.button("Regenerate", key="regenerate_btn", on_click=confirm_template_change):
+                                pass  # Logic handled in callback
+                        with popup_cols[1]:
+                            if st.button("Cancel", key="cancel_btn", on_click=cancel_template_change):
+                                pass  # Logic handled in callback
+                        st.markdown("---")
+                
+                # Generate output content
+                output_container = st.container()
+                with output_container:
                     try:
-                        formatted_output = apply_template(selected_template, result)
+                        # Show spinner while regenerating
+                        if st.session_state.regenerating:
+                            with st.spinner("Regenerating content..."):
+                                time.sleep(0.5)  # Small delay for UI feedback
+                        
+                        # If formatted output is in session state, use it
+                        if st.session_state.formatted_output:
+                            formatted_output = st.session_state.formatted_output
+                        else:
+                            # Generate for the first time if needed
+                            formatted_output = apply_template(st.session_state.current_template, result)
+                            st.session_state.formatted_output = formatted_output
+                            
                         st.markdown(formatted_output)
                         
                         # Add copy button
@@ -254,18 +388,20 @@ def main():
                     except Exception as e:
                         st.error(f"Error applying template: {str(e)}")
                 
-                # Display raw data in expander (for debugging)
-                with st.expander("View Raw Analysis Data"):
-                    st.json(result)
-            else:
-                st.error(result)
-                
-                # If we have media to display despite error, show it
-                if media_image is not None or media_path is not None:
-                    if media_type == "video" and media_path is not None:
-                        st.video(media_path)
-                    elif media_image is not None:
-                        st.image(media_image, caption="Uploaded media")
+            # Display raw data in expander (for debugging) - full width
+            st.markdown("---")
+            with st.expander("View Raw Analysis Data"):
+                st.json(result)
+        elif hasattr(st.session_state, 'analysis_success') and not st.session_state.analysis_success:
+            # Show error message
+            st.error(st.session_state.result)
+            
+            # If we have media to display despite error, show it
+            if hasattr(st.session_state, 'media_image') and st.session_state.media_image is not None:
+                if st.session_state.media_type == "video" and st.session_state.media_path is not None:
+                    st.video(st.session_state.media_path)
+                else:
+                    st.image(st.session_state.media_image, caption="Uploaded media")
     
     # Clean up temporary files when the app is closed
     def cleanup():
