@@ -73,13 +73,19 @@ def upload_video_to_gemini(file_path):
     """Upload a video file to Gemini API and wait until it's processed."""
     # Upload the file to Gemini
     video_file = client.files.upload(file=file_path)
-    st.info(f"Video uploaded. Processing...")
+    
+    # Create a placeholder for status messages
+    status_placeholder = st.empty()
+    status_placeholder.info("Video uploaded. Processing...")
     
     # Wait for processing to complete
     while video_file.state.name == "PROCESSING":
         time.sleep(1)
         video_file = client.files.get(name=video_file.name)
         
+    # Clear the processing message
+    status_placeholder.empty()
+    
     # Check if processing was successful
     if video_file.state.name == "FAILED":
         raise ValueError(f"Video processing failed: {video_file.state.name}")
@@ -185,6 +191,18 @@ def main():
     st.title("🔍 Product Analyzer")
     st.write("Upload an image or video of a product to generate customized descriptions.")
     
+    # Add instructions at the top
+    with st.expander("Tips for Best Results", expanded=True):
+        st.markdown("""
+        ## Tips for Best Results
+        
+        - Use clear, well-lit images with the product as the main focus
+        - Remove distracting backgrounds when possible
+        - For complex products, try multiple angles
+        - For videos, ensure the product is clearly visible in the middle frames
+        - The analyzer works best with physical products rather than digital goods
+        """)
+    
     # File uploader
     uploaded_file = st.file_uploader(
         "Choose an image or video file", 
@@ -248,18 +266,6 @@ def main():
                         st.video(media_path)
                     elif media_image is not None:
                         st.image(media_image, caption="Uploaded media")
-    
-    # Add instructions at the bottom
-    with st.expander("Tips for Best Results"):
-        st.markdown("""
-        ## Tips for Getting the Best Results
-        
-        - Use clear, well-lit images with the product as the main focus
-        - Remove distracting backgrounds when possible
-        - For complex products, try multiple angles
-        - For videos, ensure the product is clearly visible in the middle frames
-        - The analyzer works best with physical products rather than digital goods
-        """)
     
     # Clean up temporary files when the app is closed
     def cleanup():
