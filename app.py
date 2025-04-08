@@ -311,7 +311,7 @@ def main():
                     st.video(media_path)
                 else:
                     # Display image for image files or if video display fails
-                    st.image(media_image, use_column_width=True)
+                    st.image(media_image, use_container_width=True)
                 
                 st.caption(f"Detected Product: {result.get('product_category', 'Unknown')}")
             
