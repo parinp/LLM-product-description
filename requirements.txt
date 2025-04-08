@@ -2,4 +2,5 @@ streamlit
 google-genai
 pillow
 python-dotenv
-opencv-python
+# opencv-python
+opencv-python-headless
