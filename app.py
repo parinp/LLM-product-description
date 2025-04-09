@@ -40,7 +40,7 @@ if OPENROUTER_API_KEY:
 # Set page config
 st.set_page_config(
     page_title="Product Analyzer",
-    page_icon="🔍",
+    page_icon="static/analyze.png",
     layout="wide",
 )
 
