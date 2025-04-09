@@ -70,7 +70,7 @@ def generate_product_prompt(file_type="image"):
         "product_category": "Category and subcategory of the product",
         "features": ["List of 3-5 key visible features"],
         "materials": ["List of visible materials used"],
-        "description": "A paragraph describing the product in detail",
+        "description": "A paragraph describing the product in detail. Ensure the description is concise and to the point within a few sentences that would take up 2-3 lines of text.",
         "specifications": {{"spec1": "value1", "spec2": "value2"}},
         "dimensions": "Approximate dimensions if visible",
         "benefits": ["List of 3-5 potential user benefits"],
