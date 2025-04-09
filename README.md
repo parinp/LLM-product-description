@@ -117,3 +117,9 @@ Click on "Advanced Options" to access model selection:
 ## License
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+## Product Showcase
+
+Below is a demonstration of the product analyzer in action:
+
+[!Product Analyzer Demo](https://github.com/yourusername/LLM-product-description/raw/main/static/image_demo.webm)
