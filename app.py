@@ -22,14 +22,14 @@ GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 OPENROUTER_API_KEY = st.secrets["OPENROUTER_API_KEY"]
 
 
-if not GEMINI_API_KEY:
-    st.error("GEMINI_API_KEY not found. Please add it to your .env file.")
+if not GEMINI_API_KEY or not OPENROUTER_API_KEY:
+    st.error("API keys not found. Please add them to your .env file.")
     st.stop()
 
-# Configure Gemini API
-client = genai.Client(api_key=GEMINI_API_KEY)
+# Initialize Gemini API
+gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
-# Configure OpenRouter client
+# Initialize OpenRouter client
 openrouter_client = None
 if OPENROUTER_API_KEY:
     openrouter_client = OpenAI(
@@ -58,10 +58,10 @@ if 'product_data' not in st.session_state:
 if 'regenerating' not in st.session_state:
     st.session_state.regenerating = False
 if 'selected_model' not in st.session_state:
-    st.session_state.selected_model = "gemini-2.0-flash"  # Default to Gemini 2.0 Flash
+    st.session_state.selected_model = "gemini-2.0-flash"
 
 def generate_product_prompt(file_type="image"):
-    """Generate a prompt for product analysis based on file type."""
+    """Generate a prompt for product analysis based on file type and return a string in json format"""
     return f"""
     You are a product analysis expert. Please analyze this {file_type} and provide the following information in JSON format:
     
@@ -88,10 +88,7 @@ def generate_product_prompt(file_type="image"):
 
 def read_image_file(uploaded_file):
     """Read an image file and return a PIL Image object."""
-    # Read bytes from uploaded file
     bytes_data = uploaded_file.getvalue()
-    
-    # Convert bytes to image
     img = Image.open(io.BytesIO(bytes_data))
     return img
 
@@ -103,22 +100,22 @@ def save_uploaded_file(uploaded_file):
 
 def upload_video_to_gemini(file_path):
     """Upload a video file to Gemini API and wait until it's processed."""
-    # Upload the file to Gemini
-    video_file = client.files.upload(file=file_path)
     
-    # Create a placeholder for status messages
+    video_file = gemini_client.files.upload(file=file_path)
+    
+    # Status placeholder
     status_placeholder = st.empty()
     status_placeholder.info("Video uploaded. Processing...")
     
-    # Wait for processing to complete
+    # Wait
     while video_file.state.name == "PROCESSING":
         time.sleep(1)
-        video_file = client.files.get(name=video_file.name)
+        video_file = gemini_client.files.get(name=video_file.name)
         
-    # Clear the processing message
+    # Clear messages
     status_placeholder.empty()
     
-    # Check if processing was successful
+    # Check if successful
     if video_file.state.name == "FAILED":
         raise ValueError(f"Video processing failed: {video_file.state.name}")
     
@@ -127,7 +124,7 @@ def upload_video_to_gemini(file_path):
 def delete_gemini_file(file_name):
     """Delete a file from Gemini servers."""
     try:
-        client.files.delete(name=file_name)
+        gemini_client.files.delete(name=file_name)
         return True
     except Exception as e:
         st.warning(f"Failed to delete file from Gemini servers: {str(e)}")
@@ -148,7 +145,7 @@ def analyze_with_openrouter(image, model_name, prompt):
     if not openrouter_client:
         raise ValueError("Open-source models API key not configured")
     
-    # Convert image to RGB mode (remove alpha channel) if needed
+    # Convert image to RGB mode
     if image.mode == 'RGBA':
         image = image.convert('RGB')
     
@@ -189,7 +186,7 @@ def analyze_media(uploaded_file, file_type):
         gemini_file_name = None
         selected_model = st.session_state.selected_model
         
-        # Check if we should use OpenRouter
+        # Check if open-source model is selected
         use_openrouter = is_openrouter_model(selected_model)
         
         # Process based on file type
@@ -208,7 +205,7 @@ def analyze_media(uploaded_file, file_type):
                     return False, image, f"Error with OpenRouter API: {str(e)}", None, file_type
             else:
                 # Generate content using Gemini
-                response = client.models.generate_content(
+                response = gemini_client.models.generate_content(
                     model=selected_model,
                     contents=[prompt, image]
                 )
@@ -231,7 +228,7 @@ def analyze_media(uploaded_file, file_type):
                 gemini_file_name = video_file.name
                 
                 # Generate content using the video file reference
-                response = client.models.generate_content(
+                response = gemini_client.models.generate_content(
                     model=selected_model,
                     contents=[prompt, video_file]
                 )
@@ -267,6 +264,7 @@ def analyze_media(uploaded_file, file_type):
                 raise e
         
         # Parse JSON from the response
+        # This step is necessary because free models are unable to generated structured outputs
         try:
             # Extract JSON string from response
             # Check if the response is wrapped in ```json and ``` markers
@@ -334,16 +332,14 @@ def get_available_models():
         "gemini-2.5-pro-exp-03-25"
     ]
     
-    openrouter_models = []
-    if OPENROUTER_API_KEY:
-        openrouter_models = [
-            "meta-llama/llama-4-maverick:free",
-            "meta-llama/llama-4-scout:free",
-            "allenai/molmo-7b-d:free",
-            "qwen/qwen2.5-vl-72b-instruct:free",
-            "mistralai/mistral-small-3.1-24b-instruct:free"
-        ]
-    
+    openrouter_models = [
+        "meta-llama/llama-4-maverick:free",
+        "meta-llama/llama-4-scout:free",
+        "allenai/molmo-7b-d:free",
+        "qwen/qwen2.5-vl-72b-instruct:free",
+        "mistralai/mistral-small-3.1-24b-instruct:free"
+    ]
+
     return gemini_models + openrouter_models
 
 def is_openrouter_model(model_name):
