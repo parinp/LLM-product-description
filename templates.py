@@ -18,15 +18,16 @@ def format_ecommerce_listing(product_data):
     description = product_data.get('description', '')
     materials = product_data.get('materials', [])
     
-    formatted_features = '\n'.join([f"• {feature}" for feature in features])
+    # Format each feature as a proper markdown list item
+    formatted_features = '\n'.join([f"- {feature}" for feature in features])
     
     return f"""# {product_name}
 
-## Key Features
-{formatted_features}
-
 ## Description
 {description}
+
+## Key Features
+{formatted_features}
 
 ## Materials
 {', '.join(materials)}
@@ -48,8 +49,9 @@ def format_marketing_copy(product_data):
     target_audience = product_data.get('target_audience', 'consumers')
     emotional_appeal = product_data.get('emotional_appeal', '')
     
-    benefits_text = '\n'.join([f"• {benefit}" for benefit in benefits])
-    usp_text = '\n'.join([f"• {usp}" for usp in unique_selling_points])
+    # Format benefits and unique selling points as proper markdown lists
+    benefits_text = '\n'.join([f"- {benefit}" for benefit in benefits])
+    usp_text = '\n'.join([f"- {usp}" for usp in unique_selling_points])
     
     return f"""# Introducing the {product_name}
 
@@ -80,8 +82,9 @@ def format_technical_specification(product_data):
     dimensions = product_data.get('dimensions', '')
     features = product_data.get('features', [])
     
-    specs_text = '\n'.join([f"• **{key}**: {value}" for key, value in specifications.items()])
-    features_text = '\n'.join([f"• {feature}" for feature in features])
+    # Format specifications and features as proper markdown lists
+    specs_text = '\n'.join([f"- **{key}**: {value}" for key, value in specifications.items()])
+    features_text = '\n'.join([f"- {feature}" for feature in features])
     
     return f"""# Technical Specifications: {product_name}
 
