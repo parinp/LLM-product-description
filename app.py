@@ -13,8 +13,8 @@ from templates import get_template_names, apply_template
 
 # Load environment variables
 load_dotenv()
-# GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 
 if not GEMINI_API_KEY:
     st.error("GEMINI_API_KEY not found. Please add it to your .env file.")
@@ -43,6 +43,8 @@ if 'product_data' not in st.session_state:
     st.session_state.product_data = None
 if 'regenerating' not in st.session_state:
     st.session_state.regenerating = False
+if 'selected_model' not in st.session_state:
+    st.session_state.selected_model = "gemini-2.0-flash"
 
 def generate_product_prompt(file_type="image"):
     """Generate a prompt for product analysis based on file type."""
@@ -129,9 +131,9 @@ def analyze_media(uploaded_file, file_type):
             # For images, use direct approach
             image = read_image_file(uploaded_file)
             
-            # Generate content using Gemini
+            # Generate content using Gemini with selected model
             response = client.models.generate_content(
-                model="gemini-2.0-flash",
+                model=st.session_state.selected_model,
                 contents=[prompt, image]
             )
             
@@ -147,9 +149,9 @@ def analyze_media(uploaded_file, file_type):
                 video_file = upload_video_to_gemini(temp_file_path)
                 gemini_file_name = video_file.name
                 
-                # Generate content using the video file reference
+                # Generate content using the video file reference with selected model
                 response = client.models.generate_content(
-                    model="gemini-2.0-flash",
+                    model=st.session_state.selected_model,
                     contents=[prompt, video_file]
                 )
                 
@@ -240,6 +242,34 @@ def cancel_template_change():
     # Update the radio button value
     st.session_state.selected_template_radio = st.session_state.previous_template
 
+def get_available_models():
+    """
+    Returns a list of available Gemini models for analysis.
+    
+    Returns:
+        list: List of available model names
+    """
+    return [
+        "gemini-2.0-flash",
+        "gemini-2.5-pro-exp-03-25"
+    ]
+
+def select_model():
+    """
+    Creates a model selection dropdown in the Streamlit interface.
+    
+    Returns:
+        str: Selected model name
+    """
+    available_models = get_available_models()
+    selected_model = st.selectbox(
+        "Select Model",
+        available_models,
+        index=available_models.index(st.session_state.selected_model),
+        help="Choose the Gemini model to use for analysis"
+    )
+    return selected_model
+
 def main():
     """Main function to run the Streamlit app."""
     st.title("🔍 Product Analyzer")
@@ -257,6 +287,9 @@ def main():
         - The analyzer works best with physical products rather than digital goods
         """)
     
+    # Add model selection
+    st.session_state.selected_model = select_model()
+
     # File uploader
     uploaded_file = st.file_uploader(
         "Choose an image or video file", 
