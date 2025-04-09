@@ -9,12 +9,18 @@ import cv2
 import numpy as np
 import tempfile
 import time
+import json
+import base64
+from openai import OpenAI
 from templates import get_template_names, apply_template
 
 # Load environment variables
 load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-# GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+# GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+OPENROUTER_API_KEY = st.secrets["OPENROUTER_API_KEY"]
+
 
 if not GEMINI_API_KEY:
     st.error("GEMINI_API_KEY not found. Please add it to your .env file.")
@@ -22,6 +28,14 @@ if not GEMINI_API_KEY:
 
 # Configure Gemini API
 client = genai.Client(api_key=GEMINI_API_KEY)
+
+# Configure OpenRouter client
+openrouter_client = None
+if OPENROUTER_API_KEY:
+    openrouter_client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=OPENROUTER_API_KEY,
+    )
 
 # Set page config
 st.set_page_config(
@@ -44,7 +58,7 @@ if 'product_data' not in st.session_state:
 if 'regenerating' not in st.session_state:
     st.session_state.regenerating = False
 if 'selected_model' not in st.session_state:
-    st.session_state.selected_model = "gemini-2.0-flash"
+    st.session_state.selected_model = "gemini-2.0-flash"  # Default to Gemini 2.0 Flash
 
 def generate_product_prompt(file_type="image"):
     """Generate a prompt for product analysis based on file type."""
@@ -119,28 +133,95 @@ def delete_gemini_file(file_name):
         st.warning(f"Failed to delete file from Gemini servers: {str(e)}")
         return False
 
+def analyze_with_openrouter(image, model_name, prompt):
+    """
+    Analyze the image using OpenRouter API.
+    
+    Args:
+        image (PIL.Image): Image to analyze
+        model_name (str): OpenRouter model ID to use
+        prompt (str): Prompt for the model
+        
+    Returns:
+        str: Response from the model
+    """
+    if not openrouter_client:
+        raise ValueError("Open-source models API key not configured")
+    
+    # Convert image to RGB mode (remove alpha channel) if needed
+    if image.mode == 'RGBA':
+        image = image.convert('RGB')
+    
+    # Convert image to base64
+    buffered = io.BytesIO()
+    image.save(buffered, format="JPEG")
+    base64_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    
+    try:
+        response = openrouter_client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=2048
+        )
+        
+        return response.choices[0].message.content
+    except Exception as e:
+        raise Exception(f"Open-source models API error: {str(e)}")
+
 def analyze_media(uploaded_file, file_type):
-    """Analyze the uploaded media using Gemini Vision API."""
+    """Analyze the uploaded media using either Gemini Vision API or OpenRouter API."""
     try:
         # Create the prompt
         prompt = generate_product_prompt(file_type)
         gemini_file_name = None
+        selected_model = st.session_state.selected_model
+        
+        # Check if we should use OpenRouter
+        use_openrouter = is_openrouter_model(selected_model)
         
         # Process based on file type
         if file_type == "image":
-            # For images, use direct approach
+            # For images, process based on selected API
             image = read_image_file(uploaded_file)
             
-            # Generate content using Gemini with selected model
-            response = client.models.generate_content(
-                model=st.session_state.selected_model,
-                contents=[prompt, image]
-            )
+            if use_openrouter:
+                if not OPENROUTER_API_KEY:
+                    return False, image, "Open-source models API key not configured. Please add it to your .env file.", None, file_type
+                
+                # Use OpenRouter for analysis
+                try:
+                    response_text = analyze_with_openrouter(image, selected_model, prompt)
+                except Exception as e:
+                    return False, image, f"Error with OpenRouter API: {str(e)}", None, file_type
+            else:
+                # Generate content using Gemini
+                response = client.models.generate_content(
+                    model=selected_model,
+                    contents=[prompt, image]
+                )
+                response_text = response.text
             
             return_image = image
             return_media_path = None
             
         else:  # video
+            # Videos are only supported in Gemini currently
+            if use_openrouter:
+                return False, None, "Video analysis is currently only supported with Google Gemini models. Please select a Gemini model.", None, file_type
+            
             # For videos, upload to Gemini
             temp_file_path = save_uploaded_file(uploaded_file)
             
@@ -149,11 +230,12 @@ def analyze_media(uploaded_file, file_type):
                 video_file = upload_video_to_gemini(temp_file_path)
                 gemini_file_name = video_file.name
                 
-                # Generate content using the video file reference with selected model
+                # Generate content using the video file reference
                 response = client.models.generate_content(
-                    model=st.session_state.selected_model,
+                    model=selected_model,
                     contents=[prompt, video_file]
                 )
+                response_text = response.text
                 
                 # Delete the file from Gemini servers after analysis
                 delete_gemini_file(gemini_file_name)
@@ -185,10 +267,8 @@ def analyze_media(uploaded_file, file_type):
                 raise e
         
         # Parse JSON from the response
-        import json
         try:
             # Extract JSON string from response
-            response_text = response.text
             # Check if the response is wrapped in ```json and ``` markers
             if "```json" in response_text and "```" in response_text.split("```json", 1)[1]:
                 json_str = response_text.split("```json", 1)[1].split("```", 1)[0].strip()
@@ -199,7 +279,7 @@ def analyze_media(uploaded_file, file_type):
             product_data = json.loads(json_str)
             return True, return_image, product_data, return_media_path, file_type
         except json.JSONDecodeError as e:
-            return False, return_image, f"Error parsing JSON response: {str(e)}. Raw response: {response.text}", return_media_path, file_type
+            return False, return_image, f"Error parsing JSON response: {str(e)}. Raw response: {response_text}", return_media_path, file_type
     
     except Exception as e:
         return False, None, f"Error analyzing media: {str(e)}", None, file_type
@@ -244,30 +324,137 @@ def cancel_template_change():
 
 def get_available_models():
     """
-    Returns a list of available Gemini models for analysis.
+    Returns a list of available models for analysis.
     
     Returns:
         list: List of available model names
     """
-    return [
+    gemini_models = [
         "gemini-2.0-flash",
         "gemini-2.5-pro-exp-03-25"
     ]
+    
+    openrouter_models = []
+    if OPENROUTER_API_KEY:
+        openrouter_models = [
+            "meta-llama/llama-4-maverick:free",
+            "meta-llama/llama-4-scout:free",
+            "allenai/molmo-7b-d:free",
+            "qwen/qwen2.5-vl-72b-instruct:free",
+            "mistralai/mistral-small-3.1-24b-instruct:free"
+        ]
+    
+    return gemini_models + openrouter_models
+
+def is_openrouter_model(model_name):
+    """
+    Checks if the given model is available through OpenRouter.
+    
+    Args:
+        model_name (str): Name of the model to check
+        
+    Returns:
+        bool: True if the model is an OpenRouter model, False otherwise
+    """
+    return model_name not in ["gemini-2.0-flash", "gemini-2.5-pro-exp-03-25"]
 
 def select_model():
     """
-    Creates a model selection dropdown in the Streamlit interface.
+    Creates a model selection interface in the Streamlit app,
+    grouping models by their provider.
     
     Returns:
         str: Selected model name
     """
-    available_models = get_available_models()
-    selected_model = st.selectbox(
-        "Select Model",
-        available_models,
-        index=available_models.index(st.session_state.selected_model),
-        help="Choose the Gemini model to use for analysis"
+    # Get all available models
+    all_models = get_available_models()
+    
+    # Group models by provider
+    gemini_models = [m for m in all_models if not is_openrouter_model(m)]
+    openrouter_models = [m for m in all_models if is_openrouter_model(m)]
+    
+    # Provider selection
+    provider = st.radio(
+        "Select Provider",
+        ["Google Gemini", "Open-source models"],
+        index=0 if not is_openrouter_model(st.session_state.selected_model) else 1,
+        help="Choose the AI provider"
     )
+    
+    if provider == "Google Gemini":
+        available_models = gemini_models
+        # Default to first Gemini model if current selection is not a Gemini model
+        default_index = 0
+        if st.session_state.selected_model in gemini_models:
+            default_index = gemini_models.index(st.session_state.selected_model)
+            
+        selected_model = st.selectbox(
+            "Select Gemini Model",
+            available_models,
+            index=default_index,
+            help="Choose the Gemini model to use for analysis"
+        )
+        
+        # Show Gemini model description
+        if "gemini-2.0-flash" in selected_model:
+            st.info("Gemini 2.0 Flash is a fast and efficient model for image analysis with good accuracy for most use cases.")
+        elif "gemini-2.5" in selected_model:
+            st.info("Gemini 2.5 Pro is an advanced model with improved detail recognition and better understanding of complex products.")
+        
+    else:
+        if not OPENROUTER_API_KEY:
+            st.error("Open-source models API key not configured. Please add it to your .env file.")
+            if openrouter_models:
+                selected_model = st.selectbox(
+                    "Select Open-source Model (disabled)",
+                    openrouter_models,
+                    index=0,
+                    disabled=True
+                )
+                selected_model = st.session_state.selected_model  # Keep current selection
+            else:
+                selected_model = st.session_state.selected_model  # Keep current selection
+        else:
+            available_models = openrouter_models
+            # Default to first OpenRouter model if current selection is not an OpenRouter model
+            default_index = 0
+            if st.session_state.selected_model in openrouter_models:
+                default_index = openrouter_models.index(st.session_state.selected_model)
+                
+            model_display_names = {
+                "meta-llama/llama-4-maverick:free": "Meta Llama 4.0 Maverick",
+                "meta-llama/llama-4-scout:free": "Meta Llama 4.0 Scout",
+                "allenai/molmo-7b-d:free": "MoLMo 7B",
+                "qwen/qwen2.5-vl-72b-instruct:free": "Qwen 2.5 VL 72B",
+                "mistralai/mistral-small-3.1-24b-instruct:free": "Mistral Small 3.1 24B"
+            }
+            
+            # Create a list of display names in the same order as available_models
+            display_options = [model_display_names.get(model, model) for model in available_models]
+            
+            # Create a mapping from display name back to model ID
+            display_to_model = {display: model for display, model in zip(display_options, available_models)}
+            
+            selected_display = st.selectbox(
+                "Select Open-source Model",
+                display_options,
+                index=default_index,
+                help="Choose the open-source model to use for analysis"
+            )
+            
+            # Convert the display name back to the model ID
+            selected_model = display_to_model[selected_display]
+            
+            # Always show model description for selected OpenRouter model
+            if "llama-4" in selected_model:
+                st.info("Meta Llama 4 offers high-quality image understanding with strong contextual analysis.")
+            elif "molmo" in selected_model:
+                st.info("MoLMo is a multimodal model that excels at understanding complex products with good visual detail recognition.")
+            elif "qwen" in selected_model:
+                st.info("Qwen 2.5 VL is a powerful multimodal model with excellent image understanding and detailed descriptions.")
+            elif "mistral" in selected_model:
+                st.info("Mistral Small provides balanced performance for product analysis with efficient processing.")
+    
     return selected_model
 
 def main():
@@ -287,8 +474,39 @@ def main():
         - The analyzer works best with physical products rather than digital goods
         """)
     
-    # Add model selection
-    st.session_state.selected_model = select_model()
+    # Add model selection as an advanced option (hidden by default)
+    with st.expander("Advanced Options", expanded=False):
+        st.markdown("### Model Selection (Advanced)")
+        st.write("Select which AI model to use for image analysis. Different models may provide varying levels of detail and accuracy.")
+        st.session_state.selected_model = select_model()
+    
+    # If no model is explicitly selected, use the default
+    if 'selected_model' not in st.session_state or st.session_state.selected_model is None:
+        st.session_state.selected_model = "gemini-2.0-flash"
+    
+    # Show a small indicator of the currently selected model
+    selected_model_name = st.session_state.selected_model
+    # Get a user-friendly name
+    if is_openrouter_model(selected_model_name):
+        # For OpenRouter models, use their friendly names
+        model_display_names = {
+            "meta-llama/llama-4-maverick:free": "Meta Llama 4.0 Maverick",
+            "meta-llama/llama-4-scout:free": "Meta Llama 4.0 Scout",
+            "allenai/molmo-7b-d:free": "MoLMo 7B",
+            "qwen/qwen2.5-vl-72b-instruct:free": "Qwen 2.5 VL 72B", 
+            "mistralai/mistral-small-3.1-24b-instruct:free": "Mistral Small 3.1 24B"
+        }
+        display_name = model_display_names.get(selected_model_name, selected_model_name)
+        st.caption(f"Using model: {display_name} (open-source)")
+    else:
+        # For Gemini models, format the name nicely
+        if "gemini-2.0-flash" in selected_model_name:
+            display_name = "Gemini 2.0 Flash"
+        elif "gemini-2.5" in selected_model_name:
+            display_name = "Gemini 2.5 Pro"
+        else:
+            display_name = selected_model_name
+        st.caption(f"Using model: {display_name}")
 
     # File uploader
     uploaded_file = st.file_uploader(
@@ -413,14 +631,6 @@ def main():
                             st.session_state.formatted_output = formatted_output
                             
                         st.markdown(formatted_output)
-                        
-                        # Add copy button
-                        st.download_button(
-                            label="Copy to clipboard",
-                            data=formatted_output,
-                            file_name=f"{result.get('product_name', 'product').replace(' ', '_')}.md",
-                            mime="text/markdown"
-                        )
                     except Exception as e:
                         st.error(f"Error applying template: {str(e)}")
                 
