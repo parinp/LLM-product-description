@@ -23,11 +23,11 @@ def format_ecommerce_listing(product_data):
     
     return f"""# {product_name}
 
-## Key Features
-{formatted_features}
-
 ## Description
 {description}
+
+## Key Features
+{formatted_features}
 
 ## Materials
 {', '.join(materials)}
