@@ -43,6 +43,27 @@ A Streamlit web application that analyzes product images or videos using AI visi
    - You can get a Gemini API key from [Google AI Studio](https://ai.google.dev/)
    - You can get an OpenRouter API key from [OpenRouter.ai](https://openrouter.ai/)
 
+4. Configure API keys:
+   - For local development:
+     - In `app.py`, uncomment the lines using `os.getenv()`:
+       ```python
+       GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+       OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+       ```
+     - Comment out the lines using `st.secrets`:
+       ```python
+       # GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+       # OPENROUTER_API_KEY = st.secrets["OPENROUTER_API_KEY"]
+       ```
+   - For production deployment (e.g., Streamlit Cloud):
+     - Use Streamlit secrets and keep the configuration as:
+       ```python
+       # GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+       # OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+       GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+       OPENROUTER_API_KEY = st.secrets["OPENROUTER_API_KEY"]
+       ```
+
 ## Usage
 
 1. Run the Streamlit app:
