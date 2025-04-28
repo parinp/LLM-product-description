@@ -329,6 +329,7 @@ def get_available_models():
     """
     gemini_models = [
         "gemini-2.0-flash",
+        "gemini-2.5-flash",
         "gemini-2.5-pro-exp-03-25"
     ]
     
@@ -352,7 +353,7 @@ def is_openrouter_model(model_name):
     Returns:
         bool: True if the model is an OpenRouter model, False otherwise
     """
-    return model_name not in ["gemini-2.0-flash", "gemini-2.5-pro-exp-03-25"]
+    return model_name not in ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.5-pro-exp-03-25"]
 
 def select_model():
     """
@@ -394,6 +395,8 @@ def select_model():
         # Show Gemini model description
         if "gemini-2.0-flash" in selected_model:
             st.info("Gemini 2.0 Flash is a fast and efficient model for image analysis with good accuracy for most use cases.")
+        elif "gemini-2.5-flash" in selected_model:
+            st.info("Gemini 2.5 Flash is a balanced model that combines speed with enhanced detail recognition, ideal for quick yet precise product analysis.")
         elif "gemini-2.5" in selected_model:
             st.info("Gemini 2.5 Pro is an advanced model with improved detail recognition and better understanding of complex products.")
         
@@ -498,6 +501,8 @@ def main():
         # For Gemini models, format the name nicely
         if "gemini-2.0-flash" in selected_model_name:
             display_name = "Gemini 2.0 Flash"
+        elif "gemini-2.5-flash" in selected_model_name:
+            display_name = "Gemini 2.5 Flash"
         elif "gemini-2.5" in selected_model_name:
             display_name = "Gemini 2.5 Pro"
         else:
