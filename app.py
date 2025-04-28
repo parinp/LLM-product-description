@@ -329,7 +329,7 @@ def get_available_models():
     """
     gemini_models = [
         "gemini-2.0-flash",
-        "gemini-2.5-flash",
+        "gemini-2.5-flash-preview-04-17",
         "gemini-2.5-pro-exp-03-25"
     ]
     
@@ -353,7 +353,7 @@ def is_openrouter_model(model_name):
     Returns:
         bool: True if the model is an OpenRouter model, False otherwise
     """
-    return model_name not in ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.5-pro-exp-03-25"]
+    return model_name not in ["gemini-2.0-flash", "gemini-2.5-flash-preview-04-17", "gemini-2.5-pro-exp-03-25"]
 
 def select_model():
     """
